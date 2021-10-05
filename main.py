@@ -1,47 +1,60 @@
-from markdown.preprocessors import Preprocessor
 import markdown
+
+
 import re
+from markdown.util import etree
+from markdown import Extension
 from markdown.blockprocessors import BlockProcessor
-from markdown.extensions import Extension
-from collections import OrderedDict
 
 
-class SubstitutionPreprocessor(Preprocessor):
+class DivStylesProcessor(BlockProcessor):
+    # RE_FENCE = r"{: *((.|\n)*? *)}((\n|.)*)({ *?: *?})"
 
-    def __init__(self, substitutions):
-        super().__init__()
-        self.substitutions = substitutions
+    # RE_FENCE_START = r"{: *((.|\n)*? *)}((\n|.)*)"
+    # RE_FENCE_END = r"({ *?: *?})"
 
-    def run(self, lines):
-        new_lines = []
-        for line in lines:
-            for pattern, subn in self.substitutions.items():
-                line = line.replace(pattern, subn)
-            new_lines.append(line)
-        return new_lines
+    RE_FENCE = r"{(: *(.|\n)*? *)}\n((.|\n)*){:}"
+
+    RE_FENCE_START = r"{(: *(.|\n)*? *)}\n((.|\n)*)"
+    RE_FENCE_END = r"{:}"
+
+    def run(self, parent, blocks):
+        original_block = blocks[0]
+
+        pattern = re.compile(self.RE_FENCE_START)
+        match = pattern.search(blocks[0])
+        style = match.group(3)
+        blocks[0] = re.sub(self.RE_FENCE_START, "", blocks[0])
+
+        # Find block with ending fence
+        for block_num, block in enumerate(blocks):
+            if re.search(self.RE_FENCE_END, block):
+                # remove fence
+                blocks[block_num] = re.sub(self.RE_FENCE_END, "", block)
+                # render fenced area inside a new div
+                e = etree.SubElement(parent, "div")
+                print("style found: ", style)
+                e.set("style", style)
+                self.parser.parseBlocks(e, blocks[0 : block_num + 1])
+                # remove used blocks
+                for i in range(0, block_num + 1):
+                    blocks.pop(0)
+                return True  # or could have had no return statement
+        # No closing marker!  Restore and do nothing
+        blocks[0] = original_block
+        return False  # equivalent to our test() routine returning False
 
 
-class SubstitutionExtension(Extension):
-    def extendMarkdown(self, md, md_globals):
-        md.preprocessors.add('subn', SubstitutionPreprocessor(md), '_begin')
+class BoxExtension(Extension):
+    def extendMarkdown(self, md):
+        md.parser.blockprocessors.register(DivStylesProcessor(md.parser), "box", 175)
 
 
-substitutions = OrderedDict([
-    ('hi', 'sup lil turd'),
-    ('hello', 'bello'),
-    ('Python 2', 'Python&nbsp;2'),
-    ('Python 3', 'Python&nbsp;3'),
-    ('JK Rowling', 'JK&nbsp;Rowling'),
+with open("test.md", "r") as f:
+    text = f.read()
 
-    ('LATEX', '<span class="latex">L<sup>a</sup>T<sub>e</sub>X</span>'),
-])
+    md = markdown.Markdown(extensions=[BoxExtension()])
+    html = md.convert(text)
 
-text = """
-hi hello Python 2 Python 3 JK Rowling
-"""
-
-subn_extension = SubstitutionExtension(substitutions)
-    
-        
-print(markdown.markdown(text))
-# print(markdown.markdown('# hi _hello_ hihi', extensions=[BoxExtension(), 'test-thingy', 'BoxExtension']))
+    with open("test.html", "w") as f:
+        f.write(html)
